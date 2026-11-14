@@ -37,6 +37,10 @@
         </div>
         <button class="button button-secondary" id="btnStatus" type="button">Cek status API</button>
       </div>
+      <div class="key-actions-row">
+        <button class="button button-secondary" id="btnGenerateKey" type="button">Generate API Key</button>
+        <button class="button button-secondary" id="btnCopyKey" type="button" hidden>Copy Key</button>
+      </div>
       <p class="storage-note" id="keySaved">API Key disimpan lokal pada browser ini.</p>
       <div id="statusOut" class="output" aria-live="polite"></div>
     </section>
@@ -50,11 +54,18 @@
           </div>
           <span class="tool-index">01</span>
         </div>
-        <p class="panel-description">Tempel tautan publik untuk melihat detail media, lalu siapkan video MP4 dengan audio terbaik.</p>
+        <p class="panel-description">Tempel tautan publik untuk melihat detail media, lalu siapkan video MP4 atau audio MP3.</p>
         <label for="dlUrl">Tautan media</label>
         <div class="input-action-row">
           <input type="url" id="dlUrl" placeholder="https://..." autocomplete="url" spellcheck="false">
           <button class="button button-primary" id="btnDl" type="button">Periksa media</button>
+        </div>
+        <div class="input-action-row" style="margin-top:0.5rem">
+          <label class="scale-label" for="downloadMode">Format</label>
+          <select id="downloadMode" aria-label="Format unduhan">
+            <option value="video">Full Video (MP4)</option>
+            <option value="audio">Audio Only (MP3)</option>
+          </select>
         </div>
         <div id="dlOut" class="output" aria-live="polite"></div>
       </section>
@@ -201,6 +212,43 @@
         anchor.remove();
       }
 
+      /* Generate API Key */
+      $('#btnGenerateKey').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const output = $('#statusOut');
+        button.disabled = true;
+        setStatus(output, 'Membuat API Key baru...');
+        try {
+          const response = await fetch('/api/keys/generate', { method: 'POST' });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${response.status}`);
+          }
+          const body = await response.json();
+          const newKey = body.data.apiKey;
+          keyEl.value = newKey;
+          try {
+            localStorage.setItem(API_KEY_STORAGE, newKey);
+            keySaved.textContent = 'API Key baru disimpan di browser ini.';
+          } catch {}
+          const copyBtn = $('#btnCopyKey');
+          copyBtn.hidden = false;
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(newKey).then(() => {
+              copyBtn.textContent = 'Tersalin!';
+              setTimeout(() => { copyBtn.textContent = 'Copy Key'; }, 2000);
+            }).catch(() => {
+              copyBtn.textContent = 'Gagal salin';
+            });
+          };
+          setStatus(output, `API Key baru dibuat. Simpan dengan aman — hanya tampil sekali!`, { done: true });
+        } catch (error) {
+          setError(output, error.message);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
       /* API health */
       $('#btnStatus').addEventListener('click', async (event) => {
         const button = event.currentTarget;
@@ -308,9 +356,13 @@
           result.append(mediaPreview(data));
           const downloadPanel = el('div', { className: 'download-panel' });
           const explanation = el('div');
+          const selectedMode = $('#downloadMode').value;
+          const isAudio = selectedMode === 'audio';
           explanation.append(
-            el('h3', {}, 'MP4 kualitas terbaik'),
-            el('p', { className: 'small-copy' }, 'Bahasa audio asli diprioritaskan. FFmpeg akan menggabungkan video dan audio.')
+            el('h3', {}, isAudio ? 'Audio Only (MP3)' : 'MP4 kualitas terbaik'),
+            el('p', { className: 'small-copy' }, isAudio
+              ? 'Audio terbaik diekstrak dan dikonversi ke MP3 kualitas tinggi.'
+              : 'Bahasa audio asli diprioritaskan. FFmpeg akan menggabungkan video dan audio.')
           );
           const actionRow = el('div', { className: 'action-row' });
           const startButton = el('button', { className: 'button button-primary', type: 'button' }, 'Siapkan MP4');
@@ -332,12 +384,13 @@
 
           startButton.addEventListener('click', async () => {
             startButton.disabled = true;
-            setStatus(statusBox, 'Menyiapkan unduhan dan memilih audio bahasa asli...');
+            const mode = selectedMode || 'video';
+            setStatus(statusBox, mode === 'audio' ? 'Menyiapkan ekstraksi audio MP3...' : 'Menyiapkan unduhan dan memilih audio bahasa asli...');
             try {
               const { data: job } = await api('/api/download/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
+                body: JSON.stringify({ url, mode }),
               });
               await completeMediaDownload(job.id, statusBox, startButton);
             } catch (error) {

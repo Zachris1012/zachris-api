@@ -14,6 +14,8 @@ const MAX_BUFFER = 30 * 1024 * 1024; // JSON -J bisa besar untuk video panjang
 const MAX_URL_LENGTH = 2048;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+const VIDEO_FORMAT_SELECTOR =
+  'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a][ext=m4a]/best[vcodec^=avc1][ext=mp4]/best[ext=mp4]/best';
 
 const PLATFORMS = {
   youtube: ['youtube.com', 'youtu.be'],
@@ -36,6 +38,13 @@ function createError(status, message) {
   err.status = status;
   err.expose = true; // pesan aman ditampilkan ke client
   return err;
+}
+
+function normalizeDownloadMode(rawMode) {
+  const mode = String(rawMode ?? 'video').trim().toLowerCase();
+  if (mode === 'video' || mode === 'mp4') return 'video';
+  if (mode === 'audio' || mode === 'mp3') return 'audio';
+  throw createError(400, 'Mode download harus "video" (MP4) atau "audio" (MP3).');
 }
 
 /* ---------- Validasi URL ---------- */
@@ -128,16 +137,23 @@ function buildInfoArgs(url, cookies = process.env.YTDLP_COOKIES) {
   return args;
 }
 
-function buildDownloadArgs(url, outputTemplate, cookies = process.env.YTDLP_COOKIES) {
+function buildDownloadArgs(url, outputTemplate, mode = 'video', cookies = process.env.YTDLP_COOKIES) {
+  const normalizedMode = typeof mode === 'string' ? normalizeDownloadMode(mode) : 'video';
   const args = [
     '--no-playlist', '--no-warnings', '--newline', '--socket-timeout', '20',
     '--retries', '3', '--fragment-retries', '3', '--retry-sleep', 'http:exp=1:4',
     '--user-agent', USER_AGENT, '--referer', url, '--force-ipv4',
     '--format-sort', 'lang,quality,res,fps', '--format-sort-force',
-    '--format', 'bestvideo+bestaudio/best',
-    '--merge-output-format', 'mp4', '--remux-video', 'mp4',
-    '--output', outputTemplate,
   ];
+  if (normalizedMode === 'audio') {
+    args.push('--format', 'bestaudio/best', '-x', '--audio-format', 'mp3', '--audio-quality', '0');
+  } else {
+    args.push(
+      '--format', VIDEO_FORMAT_SELECTOR,
+      '--merge-output-format', 'mp4', '--remux-video', 'mp4'
+    );
+  }
+  args.push('--output', outputTemplate);
   if (cookies) args.push('--cookies', cookies);
   args.push('--', url);
   return args;
@@ -459,6 +475,7 @@ module.exports = {
   parseAndValidateUrl,
   buildInfoArgs,
   buildDownloadArgs,
+  normalizeDownloadMode,
   createDownloadJob,
   getDownloadJobStatus,
   getCompletedDownload,
