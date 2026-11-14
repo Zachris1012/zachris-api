@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090d15">
+  <title>Zachris API</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="brand-mark" aria-hidden="true">ZA</div>
+      <div class="hero-copy">
+        <p class="eyebrow">PRIVATE TOOLBOX · LOCAL API</p>
+        <h1>Zachris API</h1>
+        <p class="hero-subtitle">Unduh media dan tingkatkan resolusi gambar dalam satu tempat.</p>
+      </div>
+      <div class="workspace-chip"><span class="live-dot"></span> Workspace lokal</div>
+    </header>
+
+    <section class="panel key-panel" aria-labelledby="key-title">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">AKSES</p>
+          <h2 id="key-title">Kunci API</h2>
+        </div>
+        <span class="tiny-label">Tersimpan di browser ini</span>
+      </div>
+      <div class="key-row">
+        <div class="key-field">
+          <label for="key">x-api-key</label>
+          <div class="key-input-wrap">
+            <input type="password" id="key" placeholder="Masukkan API Key" autocomplete="off" spellcheck="false">
+            <button class="icon-button" id="toggleKey" type="button" aria-label="Tampilkan API Key">Lihat</button>
+          </div>
+        </div>
+        <button class="button button-secondary" id="btnStatus" type="button">Cek status API</button>
+      </div>
+      <p class="storage-note" id="keySaved">API Key disimpan lokal pada browser ini.</p>
+      <div id="statusOut" class="output" aria-live="polite"></div>
+    </section>
+
+    <div class="tools-grid">
+      <section class="panel tool-panel" aria-labelledby="download-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">YOUTUBE · TIKTOK · INSTAGRAM · X</p>
+            <h2 id="download-title">Social media downloader</h2>
+          </div>
+          <span class="tool-index">01</span>
+        </div>
+        <p class="panel-description">Tempel tautan publik untuk melihat detail media, lalu siapkan video MP4 dengan audio terbaik.</p>
+        <label for="dlUrl">Tautan media</label>
+        <div class="input-action-row">
+          <input type="url" id="dlUrl" placeholder="https://..." autocomplete="url" spellcheck="false">
+          <button class="button button-primary" id="btnDl" type="button">Periksa media</button>
+        </div>
+        <div id="dlOut" class="output" aria-live="polite"></div>
+      </section>
+
+      <section class="panel tool-panel" aria-labelledby="upscale-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">SHARP · LANCZOS3</p>
+            <h2 id="upscale-title">Image upscaler</h2>
+          </div>
+          <span class="tool-index">02</span>
+        </div>
+        <p class="panel-description">Perbesar gambar 2x atau 4x dengan penajaman ringan. JPG, PNG, dan WebP hingga 10 MB.</p>
+        <label for="upFile">Pilih gambar</label>
+        <input class="file-input" type="file" id="upFile" accept="image/jpeg,image/png,image/webp">
+        <div class="input-action-row scale-row">
+          <label class="scale-label" for="upScale">Skala</label>
+          <select id="upScale" aria-label="Skala pembesaran">
+            <option value="2">2×</option>
+            <option value="4" selected>4×</option>
+          </select>
+          <button class="button button-primary" id="btnUp" type="button">Upscale gambar</button>
+        </div>
+        <div id="upOut" class="output" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <footer class="footer-note">API key tetap di browser ini. Hasil sementara akan dihapus otomatis dari server.</footer>
+  </main>
+
+  <script>
+    (() => {
+      const $ = (selector) => document.querySelector(selector);
+      const keyEl = $('#key');
+      const keySaved = $('#keySaved');
+      const MAX_BYTES = 10 * 1024 * 1024;
+      const API_KEY_STORAGE = 'zachris-api-key';
+      let beforePreviewUrl = null;
+      let afterPreviewUrl = null;
+
+      try {
+        const saved = localStorage.getItem(API_KEY_STORAGE) || localStorage.getItem('apiKey') || '';
+        keyEl.value = saved;
+        if (saved && !localStorage.getItem(API_KEY_STORAGE)) localStorage.setItem(API_KEY_STORAGE, saved);
+      } catch {
+        keySaved.textContent = 'Penyimpanan lokal browser tidak tersedia.';
+      }
+
+      keyEl.addEventListener('input', () => {
+        try {
+          localStorage.setItem(API_KEY_STORAGE, keyEl.value.trim());
+          keySaved.textContent = 'API Key disimpan lokal pada browser ini.';
+        } catch {
+          keySaved.textContent = 'Penyimpanan lokal browser tidak tersedia.';
+        }
+      });
+
+      $('#toggleKey').addEventListener('click', (event) => {
+        const visible = keyEl.type === 'password';
+        keyEl.type = visible ? 'text' : 'password';
+        event.currentTarget.textContent = visible ? 'Sembunyi' : 'Lihat';
+        event.currentTarget.setAttribute('aria-label', visible ? 'Sembunyikan API Key' : 'Tampilkan API Key');
+      });
+
+      const el = (tag, props = {}, text) => {
+        const node = document.createElement(tag);
+        for (const [name, value] of Object.entries(props)) {
+          if (name.startsWith('aria-') || name === 'role') node.setAttribute(name, value);
+          else node[name] = value;
+        }
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const formatBytes = (bytes) => {
+        if (bytes == null) return '—';
+        if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+      };
+
+      const formatUptime = (seconds) => {
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        return `${d ? `${d}h ` : ''}${h}j ${m}m`;
+      };
+
+      function setStatus(box, text, options = {}) {
+        const { error = false, done = false, percent = null } = options;
+        const line = el('div', { className: `status-line${error ? ' is-error' : ''}${done ? ' is-done' : ''}` });
+        if (!done && !error) line.append(el('span', { className: 'spinner', 'aria-hidden': 'true' }));
+        else line.append(el('span', { className: 'status-mark', 'aria-hidden': 'true' }, error ? '!' : '✓'));
+        line.append(el('span', { className: 'status-copy' }, text));
+        if (percent !== null && Number.isFinite(percent)) {
+          const progress = el('progress', { max: 100, value: Math.max(0, Math.min(100, percent)) });
+          progress.setAttribute('aria-label', 'Kemajuan unduhan');
+          line.append(progress, el('span', { className: 'progress-value' }, `${Math.round(percent)}%`));
+        }
+        box.replaceChildren(line);
+        box.classList.add('has-content');
+      }
+
+      function setError(box, text) {
+        setStatus(box, text, { error: true });
+      }
+
+      async function request(path, options = {}) {
+        const key = keyEl.value.trim();
+        if (!key) throw new Error('Masukkan API Key terlebih dahulu.');
+        const response = await fetch(path, {
+          ...options,
+          headers: { 'x-api-key': key, ...(options.headers || {}) },
+        });
+        if (!response.ok) {
+          let message = `HTTP ${response.status}`;
+          try {
+            const body = await response.json();
+            message = body.error || message;
+          } catch {}
+          throw new Error(message);
+        }
+        return response;
+      }
+
+      async function api(path, options = {}) {
+        const response = await request(path, options);
+        const json = await response.json();
+        if (json.success === false) throw new Error(json.error || 'Permintaan gagal.');
+        return json;
+      }
+
+      const infoCell = (title, value) => {
+        const cell = el('div', { className: 'info-cell' });
+        cell.append(el('span', { className: 'info-label' }, title), el('strong', {}, String(value)));
+        return cell;
+      };
+
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      function triggerDownload(url, fileName) {
+        const anchor = el('a', { href: url, download: fileName });
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+      }
+
+      /* API health */
+      $('#btnStatus').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const output = $('#statusOut');
+        button.disabled = true;
+        setStatus(output, 'Memeriksa server, sharp, dan yt-dlp...');
+        try {
+          const data = await api('/api/status');
+          const grid = el('div', { className: 'info-grid status-grid' });
+          const sharpInfo = data.dependencies.sharp;
+          const ytdlpInfo = data.dependencies.ytdlp;
+          grid.append(
+            infoCell('Status', data.status),
+            infoCell('Uptime', formatUptime(data.uptimeSeconds)),
+            infoCell('RAM server', `${data.memory.rssMB} MB`),
+            infoCell('Sharp', sharpInfo.available ? `${sharpInfo.version} · vips ${sharpInfo.libvips}` : 'Tidak tersedia'),
+            infoCell('yt-dlp', ytdlpInfo.available ? ytdlpInfo.version : 'Tidak tersedia'),
+            infoCell('Node.js', `${data.runtime.node} · ${data.runtime.arch}`),
+            infoCell('File sementara', `${data.temp.files} · TTL ${data.temp.ttlMinutes} menit`)
+          );
+          output.replaceChildren(grid);
+          output.classList.add('has-content');
+        } catch (error) {
+          setError(output, error.message);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      function mediaPreview(data) {
+        const card = el('div', { className: 'media-result' });
+        if (data.thumbnail) {
+          const image = el('img', { className: 'media-thumbnail', src: data.thumbnail, alt: `Thumbnail: ${data.title || 'media'}`, referrerPolicy: 'no-referrer' });
+          card.append(image);
+        }
+        const details = el('div', { className: 'media-details' });
+        details.append(
+          el('p', { className: 'eyebrow' }, `${data.platform || 'MEDIA'} · DETAIL`),
+          el('h3', {}, data.title || 'Media tanpa judul'),
+          el('p', { className: 'media-meta' }, [data.uploader, data.durationText, data.itemCount > 1 ? `${data.itemCount} item` : null].filter(Boolean).join(' · ') || 'Info media tersedia')
+        );
+        card.append(details);
+        return card;
+      }
+
+      function sourceLinks(title, items, noAudio = false) {
+        if (!items || !items.length) return null;
+        const group = el('div', { className: 'source-group' });
+        group.append(el('h4', {}, title));
+        const links = el('div', { className: 'source-links' });
+        for (const item of items) {
+          if (!/^https?:\/\//i.test(item.url || '')) continue;
+          const size = item.filesize ? ` · ${formatBytes(item.filesize)}` : '';
+          const label = `${item.quality} · ${String(item.ext || '').toUpperCase()}${size}${noAudio ? ' · video saja' : ''}`;
+          links.append(el('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer' }, label));
+        }
+        group.append(links);
+        return group;
+      }
+
+      async function completeMediaDownload(jobId, statusBox, downloadButton) {
+        while (true) {
+          const { data: job } = await api(`/api/download/jobs/${encodeURIComponent(jobId)}`);
+          if (job.status === 'error') throw new Error(job.error || 'Unduhan gagal.');
+          if (job.status === 'complete') break;
+          if (job.status === 'merging') {
+            setStatus(statusBox, 'FFmpeg sedang menyatukan video dan audio ke MP4.');
+          } else {
+            const percent = typeof job.percent === 'number' ? job.percent : null;
+            setStatus(statusBox, percent === null ? 'yt-dlp sedang mengunduh video dan audio terbaik...' : `Mengunduh media... ${Math.round(percent)}%`, { percent });
+          }
+          await sleep(900);
+        }
+
+        setStatus(statusBox, 'MP4 siap. Mengambil berkas dari server...');
+        const response = await request(`/api/download/jobs/${encodeURIComponent(jobId)}/file`);
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const downloadLink = el('a', { className: 'button button-primary result-download', href: objectUrl, download: `zachris-api-${jobId}.mp4` }, 'Download MP4');
+        downloadButton.hidden = true;
+        statusBox.replaceChildren(
+          el('div', { className: 'success-note' }, `Selesai · ${formatBytes(blob.size)} · gabungan MP4`),
+          downloadLink
+        );
+        statusBox.classList.add('has-content');
+        triggerDownload(objectUrl, `zachris-api-${jobId}.mp4`);
+      }
+
+      /* Social downloader */
+      $('#btnDl').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const output = $('#dlOut');
+        const url = $('#dlUrl').value.trim();
+        if (!url) return setError(output, 'Tempel tautan media terlebih dahulu.');
+        button.disabled = true;
+        setStatus(output, 'Membaca metadata dan pilihan kualitas...');
+        try {
+          const { data } = await api('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+          });
+
+          const result = el('div', { className: 'result-stack' });
+          result.append(mediaPreview(data));
+          const downloadPanel = el('div', { className: 'download-panel' });
+          const explanation = el('div');
+          explanation.append(
+            el('h3', {}, 'MP4 kualitas terbaik'),
+            el('p', { className: 'small-copy' }, 'Bahasa audio asli diprioritaskan. FFmpeg akan menggabungkan video dan audio.')
+          );
+          const actionRow = el('div', { className: 'action-row' });
+          const startButton = el('button', { className: 'button button-primary', type: 'button' }, 'Siapkan MP4');
+          const statusBox = el('div', { className: 'operation-status' });
+          statusBox.setAttribute('aria-live', 'polite');
+          statusBox.setAttribute('role', 'status');
+          actionRow.append(startButton);
+          downloadPanel.append(explanation, actionRow, statusBox);
+          result.append(downloadPanel);
+
+          const details = el('details', { className: 'source-details' });
+          details.append(el('summary', {}, 'Tautan sumber langsung'));
+          for (const group of [sourceLinks('Video + audio', data.video), sourceLinks('Video tanpa audio', data.videoOnly, true), sourceLinks('Audio', data.audio)]) {
+            if (group) details.append(group);
+          }
+          if (details.childElementCount > 1) result.append(details);
+          output.replaceChildren(result);
+          output.classList.add('has-content');
+
+          startButton.addEventListener('click', async () => {
+            startButton.disabled = true;
+            setStatus(statusBox, 'Menyiapkan unduhan dan memilih audio bahasa asli...');
+            try {
+              const { data: job } = await api('/api/download/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
+              });
+              await completeMediaDownload(job.id, statusBox, startButton);
+            } catch (error) {
+              startButton.disabled = false;
+              setError(statusBox, error.message);
+            }
+          });
+        } catch (error) {
+          setError(output, error.message);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      function previewCard(title, detail, src, alt) {
+        const card = el('figure', { className: 'preview-card' });
+        const imageWrap = el('div', { className: 'preview-image-wrap' });
+        imageWrap.append(el('img', { src, alt, className: 'preview-image' }));
+        const caption = el('figcaption');
+        caption.append(el('strong', {}, title), el('span', {}, detail));
+        card.append(imageWrap, caption);
+        return card;
+      }
+
+      function imagePreviewPair(beforeSrc, afterSrc, file, result) {
+        const pair = el('div', { className: 'preview-pair' });
+        pair.append(
+          previewCard('Sebelum', `${result.original.width} × ${result.original.height}`, beforeSrc, `Gambar asli ${file.name}`),
+          previewCard('Sesudah', `${result.result.width} × ${result.result.height}`, afterSrc, 'Hasil upscale')
+        );
+        return pair;
+      }
+
+      $('#upFile').addEventListener('change', (event) => {
+        const file = event.currentTarget.files[0];
+        const output = $('#upOut');
+        if (beforePreviewUrl) URL.revokeObjectURL(beforePreviewUrl);
+        if (afterPreviewUrl) URL.revokeObjectURL(afterPreviewUrl);
+        afterPreviewUrl = null;
+        if (!file) {
+          output.replaceChildren();
+          output.classList.remove('has-content');
+          return;
+        }
+        if (!file.type.startsWith('image/')) return setError(output, 'Pilih file gambar yang valid.');
+        beforePreviewUrl = URL.createObjectURL(file);
+        const preview = el('div', { className: 'preview-pair preview-pair-single' });
+        preview.append(previewCard('Gambar dipilih', `${file.name} · ${formatBytes(file.size)}`, beforePreviewUrl, 'Pratinjau gambar asli'));
+        output.replaceChildren(preview);
+        output.classList.add('has-content');
+      });
+
+      /* Image upscaler */
+      $('#btnUp').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const output = $('#upOut');
+        const file = $('#upFile').files[0];
+        const scale = $('#upScale').value;
+        if (!file) return setError(output, 'Pilih gambar terlebih dahulu.');
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return setError(output, 'Format yang diterima: JPG, PNG, atau WebP.');
+        if (file.size > MAX_BYTES) return setError(output, 'Ukuran gambar maksimal 10 MB.');
+
+        button.disabled = true;
+        setStatus(output, `Mengunggah gambar untuk diproses ${scale}×...`);
+        try {
+          const form = new FormData();
+          form.append('image', file);
+          const { data } = await api(`/api/upscale?mode=json&scale=${encodeURIComponent(scale)}`, { method: 'POST', body: form });
+          setStatus(output, 'Gambar selesai diproses. Menyiapkan pratinjau hasil...');
+          const response = await request(data.file.path);
+          const blob = await response.blob();
+          if (afterPreviewUrl) URL.revokeObjectURL(afterPreviewUrl);
+          afterPreviewUrl = URL.createObjectURL(blob);
+          if (!beforePreviewUrl) beforePreviewUrl = URL.createObjectURL(file);
+
+          const result = el('div', { className: 'result-stack' });
+          result.append(imagePreviewPair(beforePreviewUrl, afterPreviewUrl, file, data));
+          const stats = el('div', { className: 'info-grid result-stats' });
+          stats.append(
+            infoCell('Ukuran awal', formatBytes(data.original.size)),
+            infoCell('Ukuran hasil', formatBytes(data.result.size)),
+            infoCell('Skala diterapkan', `${data.scale.applied}×${data.scale.clamped ? ' · dibatasi' : ''}`),
+            infoCell('Waktu proses', `${data.processingMs} ms`)
+          );
+          const extension = data.result.format === 'jpeg' ? 'jpg' : data.result.format;
+          const saveLink = el('a', {
+            className: 'button button-primary result-download',
+            href: afterPreviewUrl,
+            download: `zachris-api-${data.scale.applied}x.${extension}`,
+          }, 'Download hasil');
+          result.append(stats, saveLink);
+          output.replaceChildren(result);
+          output.classList.add('has-content');
+        } catch (error) {
+          setError(output, error.message);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

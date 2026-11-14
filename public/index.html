@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Termux API</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--bd:#2a2f3a;--tx:#e6e8ee;--mu:#8b93a7;--ac:#4f8cff;--ok:#3ecf8e;--er:#ff5c6c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,sans-serif;padding:16px}
+main{max-width:720px;margin:auto;display:grid;gap:16px}
+h1{font-size:20px;margin:0}h2{font-size:16px;margin:0 0 10px}
+section{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+input,select,button{font:inherit;color:var(--tx);background:#0f1115;border:1px solid var(--bd);border-radius:8px;padding:9px 12px}
+input[type=file]{width:100%}
+button{background:var(--ac);border-color:var(--ac);cursor:pointer;font-weight:600}
+button:disabled{opacity:.5;cursor:wait}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>input[type=text],.row>input[type=password],.row>input[type=url]{flex:1;min-width:0}
+.msg{margin-top:10px;font-size:14px;color:var(--mu)}.msg.err{color:var(--er)}.msg.ok{color:var(--ok)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:10px}
+.kv{background:#0f1115;border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+.kv small{display:block;color:var(--mu)}
+.media{display:flex;gap:12px;margin-top:12px}.media img{width:120px;height:90px;object-fit:cover;border-radius:8px;background:#0f1115}
+.media b{display:block}.media span{color:var(--mu);font-size:13px}
+.links{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.links a{background:#0f1115;border:1px solid var(--bd);border-radius:8px;padding:6px 10px;color:var(--tx);text-decoration:none;font-size:13px}
+.links a:hover{border-color:var(--ac)}
+h3{font-size:13px;color:var(--mu);margin:12px 0 0;font-weight:600}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
+td,th{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left}th{color:var(--mu);font-weight:500}
+</style>
+</head>
+<body>
+<main>
+  <h1>⚡ Termux API</h1>
+
+  <section>
+    <h2>API Key &amp; Status</h2>
+    <div class="row">
+      <input type="password" id="key" placeholder="x-api-key" autocomplete="off">
+      <button id="btnStatus">Cek Status</button>
+    </div>
+    <div id="statusOut" class="msg"></div>
+  </section>
+
+  <section>
+    <h2>Social Media Downloader</h2>
+    <div class="row">
+      <input type="url" id="dlUrl" placeholder="https://www.tiktok.com/...">
+      <button id="btnDl">Proses</button>
+    </div>
+    <div id="dlOut" class="msg"></div>
+  </section>
+
+  <section>
+    <h2>Image Upscaler</h2>
+    <div class="row">
+      <input type="file" id="upFile" accept="image/jpeg,image/png,image/webp">
+      <select id="upScale"><option value="2">2x</option><option value="4">4x</option></select>
+      <button id="btnUp">Upscale</button>
+    </div>
+    <div id="upOut" class="msg"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const keyEl = $('#key');
+  const MAX_BYTES = 10 * 1024 * 1024;
+
+  try { keyEl.value = localStorage.getItem('apiKey') || ''; } catch {}
+  keyEl.addEventListener('input', () => { try { localStorage.setItem('apiKey', keyEl.value.trim()); } catch {} });
+
+  const el = (tag, props = {}, text) => {
+    const n = document.createElement(tag);
+    Object.assign(n, props);
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  const msg = (box, text, cls = '') => { box.replaceChildren(); box.className = 'msg ' + cls; box.textContent = text; };
+  const fmtBytes = (b) => b == null ? '-' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(2) + ' MB';
+  const fmtUptime = (s) => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return `${d ? d + 'h ' : ''}${h}j ${m}m`; };
+  const busy = (btn, on, label) => { btn.disabled = on; if (label) btn.textContent = on ? '...' : label; };
+
+  async function api(path, opts = {}) {
+    const key = keyEl.value.trim();
+    if (!key) throw new Error('Isi API Key terlebih dahulu.');
+    const res = await fetch(path, { ...opts, headers: { 'x-api-key': key, ...(opts.headers || {}) } });
+    if (!(res.headers.get('content-type') || '').includes('json')) {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    }
+    const json = await res.json();
+    if (!res.ok || json.success === false) throw new Error(json.error || `HTTP ${res.status}`);
+    return json;
+  }
+
+  const kv = (k, v) => { const d = el('div', { className: 'kv' }); d.append(el('small', {}, k), el('span', {}, String(v))); return d; };
+
+  /* ---- Status ---- */
+  $('#btnStatus').addEventListener('click', async (e) => {
+    const out = $('#statusOut'), btn = e.currentTarget;
+    busy(btn, true, 'Cek Status'); msg(out, 'Memeriksa...');
+    try {
+      const s = await api('/api/status');
+      const g = el('div', { className: 'grid' });
+      const sh = s.dependencies.sharp, yt = s.dependencies.ytdlp;
+      g.append(
+        kv('Status', s.status),
+        kv('Uptime', fmtUptime(s.uptimeSeconds)),
+        kv('RAM (RSS)', s.memory.rssMB + ' MB'),
+        kv('RAM bebas sistem', s.memory.systemFreeMB + ' MB'),
+        kv('sharp', sh.available ? `${sh.version} (vips ${sh.libvips})` : 'TIDAK ADA'),
+        kv('yt-dlp', yt.available ? yt.version : 'TIDAK ADA'),
+        kv('Node', s.runtime.node + ' ' + s.runtime.arch),
+        kv('File temp', `${s.temp.files} (TTL ${s.temp.ttlMinutes}m)`)
+      );
+      out.replaceChildren(g); out.className = '';
+    } catch (err) { msg(out, err.message, 'err'); }
+    busy(btn, false, 'Cek Status');
+  });
+
+  /* ---- Downloader ---- */
+  const linkGroup = (title, items, noAudio) => {
+    if (!items || !items.length) return null;
+    const wrap = el('div');
+    wrap.append(el('h3', {}, title));
+    const box = el('div', { className: 'links' });
+    for (const f of items) {
+      if (!/^https?:\/\//i.test(f.url)) continue;
+      const label = `${f.quality} · ${f.ext.toUpperCase()}${f.filesize ? ' · ' + fmtBytes(f.filesize) : ''}${noAudio ? ' · tanpa audio' : ''}`;
+      box.append(el('a', { href: f.url, target: '_blank', rel: 'noopener noreferrer', download: '' }, label));
+    }
+    wrap.append(box);
+    return wrap;
+  };
+
+  $('#btnDl').addEventListener('click', async (e) => {
+    const out = $('#dlOut'), btn = e.currentTarget, url = $('#dlUrl').value.trim();
+    if (!url) return msg(out, 'Masukkan URL.', 'err');
+    busy(btn, true, 'Proses'); msg(out, 'Mengambil data (maks ~25 detik)...');
+    try {
+      const { data: d } = await api('/api/download', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      });
+      const frag = document.createDocumentFragment();
+      const media = el('div', { className: 'media' });
+      if (d.thumbnail) media.append(el('img', { src: d.thumbnail, alt: '', referrerPolicy: 'no-referrer' }));
+      const info = el('div');
+      info.append(
+        el('b', {}, d.title || '(tanpa judul)'),
+        el('span', {}, [d.platform, d.uploader, d.durationText].filter(Boolean).join(' · '))
+      );
+      media.append(info);
+      frag.append(media);
+      for (const g of [
+        linkGroup('Video + Audio', d.video),
+        linkGroup('Video HD (tanpa audio)', d.videoOnly, true),
+        linkGroup('Audio', d.audio),
+      ]) if (g) frag.append(g);
+      if (d.itemCount > 1) frag.append(el('div', { className: 'msg' }, `Catatan: ada ${d.itemCount} media, hanya yang pertama ditampilkan.`));
+      out.replaceChildren(frag); out.className = '';
+    } catch (err) { msg(out, err.message, 'err'); }
+    busy(btn, false, 'Proses');
+  });
+
+  /* ---- Upscaler ---- */
+  $('#btnUp').addEventListener('click', async (e) => {
+    const out = $('#upOut'), btn = e.currentTarget, file = $('#upFile').files[0];
+    if (!file) return msg(out, 'Pilih gambar dulu.', 'err');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return msg(out, 'Hanya JPG, PNG, atau WebP.', 'err');
+    if (file.size > MAX_BYTES) return msg(out, 'Ukuran file maksimal 10MB.', 'err');
+
+    busy(btn, true, 'Upscale'); msg(out, 'Mengunggah & memproses...');
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const { data: d } = await api(`/api/upscale?mode=json&scale=${$('#upScale').value}`, { method: 'POST', body: fd });
+
+      const table = el('table');
+      const head = el('tr'); ['', 'Sebelum', 'Sesudah'].forEach((t) => head.append(el('th', {}, t)));
+      table.append(head);
+      const row = (a, b, c) => { const tr = el('tr'); [a, b, c].forEach((t) => tr.append(el('td', {}, t))); table.append(tr); };
+      row('Dimensi', `${d.original.width}×${d.original.height}`, `${d.result.width}×${d.result.height}`);
+      row('Ukuran', fmtBytes(d.original.size), fmtBytes(d.result.size));
+      row('Format', d.original.format, d.result.format);
+
+      const note = `Skala ${d.scale.applied}x${d.scale.clamped ? ' (dibatasi dari ' + d.scale.requested + 'x)' : ''} · ${d.processingMs} ms · hasil tersedia ${d.file.expiresInSeconds / 60} menit`;
+      const dl = el('button', {}, 'Download Hasil');
+      dl.style.marginTop = '10px';
+      dl.addEventListener('click', async () => {
+        busy(dl, true);
+        try {
+          const res = await api(d.file.path);
+          const blob = await res.blob();
+          const a = el('a', { href: URL.createObjectURL(blob), download: `upscaled-${d.scale.applied}x-${d.file.name}` });
+          document.body.append(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        } catch (err) { alert(err.message); }
+        busy(dl, false);
+      });
+
+      out.replaceChildren(table, el('div', { className: 'msg ok' }, note), dl);
+      out.className = '';
+    } catch (err) { msg(out, err.message, 'err'); }
+    busy(btn, false, 'Upscale');
+  });
+})();
+</script>
+</body>
+</html>
