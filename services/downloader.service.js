@@ -14,8 +14,10 @@ const MAX_BUFFER = 30 * 1024 * 1024; // JSON -J bisa besar untuk video panjang
 const MAX_URL_LENGTH = 2048;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+const MAX_VIDEO_HEIGHT = parseInt(process.env.YTDLP_MAX_HEIGHT, 10) || 720;
+const MAX_FILESIZE = process.env.YTDLP_MAX_FILESIZE || '90M';
 const VIDEO_FORMAT_SELECTOR =
-  'bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b';
+  `bv*[height<=${MAX_VIDEO_HEIGHT}][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=${MAX_VIDEO_HEIGHT}]+ba/b[height<=${MAX_VIDEO_HEIGHT}]/b`;
 
 const PLATFORMS = {
   youtube: ['youtube.com', 'youtu.be'],
@@ -119,6 +121,9 @@ function mapExecError(err, stderr) {
   if (/private|log ?in|sign in|cookies|authenticat|confirm your age|age[- ]restrict/i.test(msg)) {
     return createError(422, 'Konten privat, dibatasi umur, atau memerlukan login.');
   }
+  if (/file is larger than max-filesize|max-filesize/i.test(msg)) {
+    return createError(413, `Ukuran file melebihi batas maksimal server (${MAX_FILESIZE}).`);
+  }
   if (/not available|unavailable|removed|deleted|does not exist|404/i.test(msg)) {
     return createError(404, 'Konten tidak tersedia atau sudah dihapus.');
   }
@@ -145,13 +150,14 @@ function buildDownloadArgs(url, outputTemplate, mode = 'video', cookies = proces
     '--user-agent', USER_AGENT, '--referer', url, '--force-ipv4',
     '--format-sort', 'lang,quality,res,fps', '--format-sort-force',
   ];
+  args.push('--max-filesize', MAX_FILESIZE);
   if (normalizedMode === 'audio') {
-    args.push('--format', 'bestaudio/best', '-x', '--audio-format', 'mp3', '--audio-quality', '0');
+    args.push('--format', 'bestaudio/best', '-x', '--audio-format', 'mp3', '--audio-quality', '2');
   } else {
     args.push(
       '--format', VIDEO_FORMAT_SELECTOR,
       '--merge-output-format', 'mp4',
-      '--postprocessor-args', 'ffmpeg:-vcodec libx264 -pix_fmt yuv420p -acodec aac -movflags +faststart',
+      '--postprocessor-args', 'ffmpeg:-vcodec libx264 -preset ultrafast -crf 24 -pix_fmt yuv420p -acodec aac -b:a 128k -threads 2 -movflags +faststart',
       '--remux-video', 'mp4'
     );
   }
