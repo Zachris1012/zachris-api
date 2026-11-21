@@ -219,12 +219,7 @@
         button.disabled = true;
         setStatus(output, 'Membuat API Key baru...');
         try {
-          const response = await fetch('/api/keys/generate', { method: 'POST' });
-          if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${response.status}`);
-          }
-          const body = await response.json();
+          const body = await api('/api/keys/generate', { method: 'POST' });
           const newKey = body.data.apiKey;
           keyEl.value = newKey;
           try {
@@ -309,32 +304,37 @@
         return group;
       }
 
-      async function completeMediaDownload(jobId, statusBox, downloadButton) {
+      async function completeMediaDownload(jobId, mode, statusBox, downloadButton) {
+        const isAudio = mode === 'audio';
+        const ext = isAudio ? 'mp3' : 'mp4';
+        const label = isAudio ? 'MP3' : 'MP4';
+
         while (true) {
           const { data: job } = await api(`/api/download/jobs/${encodeURIComponent(jobId)}`);
           if (job.status === 'error') throw new Error(job.error || 'Unduhan gagal.');
           if (job.status === 'complete') break;
           if (job.status === 'merging') {
-            setStatus(statusBox, 'FFmpeg sedang menyatukan video dan audio ke MP4.');
+            setStatus(statusBox, isAudio ? 'FFmpeg sedang mengonversi audio ke MP3...' : 'FFmpeg sedang menyatukan video dan audio ke MP4.');
           } else {
             const percent = typeof job.percent === 'number' ? job.percent : null;
-            setStatus(statusBox, percent === null ? 'yt-dlp sedang mengunduh video dan audio terbaik...' : `Mengunduh media... ${Math.round(percent)}%`, { percent });
+            setStatus(statusBox, percent === null ? 'yt-dlp sedang mengunduh media...' : `Mengunduh media... ${Math.round(percent)}%`, { percent });
           }
           await sleep(900);
         }
 
-        setStatus(statusBox, 'MP4 siap. Mengambil berkas dari server...');
+        setStatus(statusBox, `${label} siap. Mengambil berkas dari server...`);
         const response = await request(`/api/download/jobs/${encodeURIComponent(jobId)}/file`);
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
-        const downloadLink = el('a', { className: 'button button-primary result-download', href: objectUrl, download: `zachris-api-${jobId}.mp4` }, 'Download MP4');
+        const fileName = `zachris-api-${jobId}.${ext}`;
+        const downloadLink = el('a', { className: 'button button-primary result-download', href: objectUrl, download: fileName }, `Download ${label}`);
         downloadButton.hidden = true;
         statusBox.replaceChildren(
-          el('div', { className: 'success-note' }, `Selesai · ${formatBytes(blob.size)} · gabungan MP4`),
+          el('div', { className: 'success-note' }, `Selesai · ${formatBytes(blob.size)} · ${isAudio ? 'audio MP3' : 'gabungan MP4'}`),
           downloadLink
         );
         statusBox.classList.add('has-content');
-        triggerDownload(objectUrl, `zachris-api-${jobId}.mp4`);
+        triggerDownload(objectUrl, fileName);
       }
 
       /* Social downloader */
@@ -365,7 +365,7 @@
               : 'Bahasa audio asli diprioritaskan. FFmpeg akan menggabungkan video dan audio.')
           );
           const actionRow = el('div', { className: 'action-row' });
-          const startButton = el('button', { className: 'button button-primary', type: 'button' }, 'Siapkan MP4');
+          const startButton = el('button', { className: 'button button-primary', type: 'button' }, isAudio ? 'Siapkan MP3' : 'Siapkan MP4');
           const statusBox = el('div', { className: 'operation-status' });
           statusBox.setAttribute('aria-live', 'polite');
           statusBox.setAttribute('role', 'status');
@@ -384,7 +384,7 @@
 
           startButton.addEventListener('click', async () => {
             startButton.disabled = true;
-            const mode = selectedMode || 'video';
+            const mode = $('#downloadMode').value || 'video';
             setStatus(statusBox, mode === 'audio' ? 'Menyiapkan ekstraksi audio MP3...' : 'Menyiapkan unduhan dan memilih audio bahasa asli...');
             try {
               const { data: job } = await api('/api/download/jobs', {
@@ -392,7 +392,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url, mode }),
               });
-              await completeMediaDownload(job.id, statusBox, startButton);
+              await completeMediaDownload(job.id, mode, statusBox, startButton);
             } catch (error) {
               startButton.disabled = false;
               setError(statusBox, error.message);

@@ -18,7 +18,8 @@ exports.getDownloadInfo = async (req, res, next) => {
 
 exports.startDownload = (req, res, next) => {
   try {
-    const data = createDownloadJob(req.body ? req.body.url : undefined);
+    const { url, mode } = req.body || {};
+    const data = createDownloadJob(url, mode);
     res.status(202).json({ success: true, data });
   } catch (err) {
     next(err);
@@ -36,7 +37,8 @@ exports.getDownloadStatus = (req, res, next) => {
 exports.downloadMediaFile = (req, res, next) => {
   try {
     const file = getCompletedDownload(req.params.id);
-    res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'private, no-store' });
+    const contentType = file.fileName.endsWith('.mp3') ? 'audio/mpeg' : 'video/mp4';
+    res.set({ 'Content-Type': contentType, 'Cache-Control': 'private, no-store' });
     res.download(file.filePath, file.fileName, (err) => {
       if (err && !res.headersSent) next(err);
     });

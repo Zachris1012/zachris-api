@@ -15,7 +15,7 @@ const MAX_URL_LENGTH = 2048;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 const VIDEO_FORMAT_SELECTOR =
-  'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a][ext=m4a]/best[vcodec^=avc1][ext=mp4]/best[ext=mp4]/best';
+  'bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b';
 
 const PLATFORMS = {
   youtube: ['youtube.com', 'youtu.be'],
@@ -150,7 +150,9 @@ function buildDownloadArgs(url, outputTemplate, mode = 'video', cookies = proces
   } else {
     args.push(
       '--format', VIDEO_FORMAT_SELECTOR,
-      '--merge-output-format', 'mp4', '--remux-video', 'mp4'
+      '--merge-output-format', 'mp4',
+      '--postprocessor-args', 'ffmpeg:-vcodec libx264 -pix_fmt yuv420p -acodec aac -movflags +faststart',
+      '--remux-video', 'mp4'
     );
   }
   args.push('--output', outputTemplate);
@@ -212,15 +214,17 @@ async function removeDownloadArtifacts(id) {
   } catch {}
 }
 
-function createDownloadJob(rawUrl) {
+function createDownloadJob(rawUrl, rawMode = 'video') {
   const { url } = parseAndValidateUrl(rawUrl);
+  const normalizedMode = normalizeDownloadMode(rawMode);
   if (downloadRunning >= MAX_DOWNLOAD_CONCURRENT) {
     throw createError(429, 'Server sedang mengunduh media lain, coba lagi sebentar.');
   }
 
   const id = randomUUID();
   const outputTemplate = path.join(TEMP_DIR, `media-${id}.%(ext)s`);
-  const outputPath = path.join(TEMP_DIR, `media-${id}.mp4`);
+  const ext = normalizedMode === 'audio' ? 'mp3' : 'mp4';
+  const outputPath = path.join(TEMP_DIR, `media-${id}.${ext}`);
   const job = {
     id,
     status: 'downloading',
@@ -229,13 +233,14 @@ function createDownloadJob(rawUrl) {
     totalBytes: null,
     error: null,
     filePath: outputPath,
-    fileName: `zachris-api-${id}.mp4`,
+    fileName: `zachris-api-${id}.${ext}`,
+    mode: normalizedMode,
     createdAt: Date.now(),
   };
   downloadJobs.set(id, job);
   downloadRunning += 1;
 
-  const args = buildDownloadArgs(url, outputTemplate);
+  const args = buildDownloadArgs(url, outputTemplate, normalizedMode);
   let child;
   try {
     child = spawn('yt-dlp', args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -277,7 +282,7 @@ function createDownloadJob(rawUrl) {
   child.stderr.on('data', (chunk) => {
     const text = chunk.toString();
     stderr = (stderr + text).slice(-12000);
-    if (/\[Merger\]|Merging formats|\[VideoRemuxer\]|Remuxing/i.test(text)) job.status = 'merging';
+    if (/\[Merger\]|Merging formats|\[VideoRemuxer\]|Remuxing|\[ExtractAudio\]/i.test(text)) job.status = 'merging';
     for (const match of text.matchAll(/\[download\]\s+(\d+(?:\.\d+)?)%/g)) {
       job.percent = Math.max(0, Math.min(100, Number(match[1])));
     }

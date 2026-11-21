@@ -15,7 +15,14 @@ function generateRawKey() {
   return KEY_PREFIX + crypto.randomBytes(KEY_ENTROPY_BYTES).toString('hex');
 }
 
+const storesByPath = new Map();
+
 function createApiKeyStore(storePath) {
+  const resolvedPath = path.resolve(storePath);
+  if (storesByPath.has(resolvedPath)) {
+    return storesByPath.get(resolvedPath);
+  }
+
   let cache = null; // { keys: [{ hash, createdAt }] }
   let writeQueue = Promise.resolve(); // serialize concurrent writes
 
@@ -73,7 +80,9 @@ function createApiKeyStore(storePath) {
     });
   }
 
-  return { generateApiKey, isValidApiKey };
+  const instance = { generateApiKey, isValidApiKey };
+  storesByPath.set(resolvedPath, instance);
+  return instance;
 }
 
 module.exports = { createApiKeyStore };

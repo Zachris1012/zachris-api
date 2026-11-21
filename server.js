@@ -65,8 +65,14 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`[OK] Server berjalan di http://${HOST}:${PORT}`);
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  const localUrl = `http://${displayHost}:${PORT}`;
+  console.log(`[OK] Server berjalan di ${localUrl}`);
   startCleanup();
+
+  if (process.platform === 'win32') {
+    require('child_process').exec(`start "" "${localUrl}"`);
+  }
 });
 
 // Shutdown rapi saat Ctrl+C / Termux ditutup
